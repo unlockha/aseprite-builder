@@ -26,11 +26,28 @@ jobs:
     steps:
       - name: Fetch Aseprite release link
         id: aseprite-link
-        uses: a1393323447/fetch-release@main
-        with:
-            group: aseprite
-            repo: aseprite
-            match: Aseprite-.*?-Source.zip
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 10); do
+            if release=$(gh api repos/aseprite/aseprite/releases/latest); then
+              tag=$(jq -r '.tag_name' <<<"$release")
+              link=$(jq -r 'first(.assets[] | select(.name | test("Aseprite-.*?-Source.zip")) | .browser_download_url) // empty' <<<"$release")
+              if [[ -z "$link" ]]; then
+                echo "::error::No source zip found in release $tag"
+                exit 1
+              fi
+              echo "Found matched release($tag) download link: $link"
+              echo "download-link=$link" >> "$GITHUB_OUTPUT"
+              echo "release-tag=$tag" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "Retry after 10s"
+            sleep 10
+          done
+          echo "::error::Failed to get release info after 10 retries."
+          exit 1
 
   create-release:
     name: Create Release
@@ -96,6 +113,9 @@ jobs:
       - uses: aseprite/get-ninja@main
       - uses: ilammy/msvc-dev-cmd@v1.13.0
         if: runner.os == 'Windows'
+        env:
+          # v1.13.0 is the latest release and still declares node20
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       - name: Generating Makefiles
         shell: bash
         working-directory: aseprite
